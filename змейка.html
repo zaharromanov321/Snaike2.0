@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Snake PRO: Custom Edition</title>
+    <style>
+        :root { --primary: #4d4dff; }
+        body {
+            margin: 0; background: #0a0a12; color: white; font-family: 'Segoe UI', sans-serif;
+            display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; overflow: hidden; touch-action: none;
+        }
+        canvas { background: #000; border: 4px solid var(--primary); border-radius: 15px; box-shadow: 0 0 30px rgba(77, 77, 255, 0.3); }
+        
+        /* Экраны / Оверлеи */
+        .overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.9); z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center;
+        }
+        .card { background: #1a1a2e; padding: 30px; border-radius: 20px; border: 2px solid var(--primary); text-align: center; min-width: 280px; }
+        
+        .btn {
+            background: var(--primary); border: none; color: white; padding: 12px 25px; 
+            border-radius: 10px; cursor: pointer; font-weight: bold; font-size: 18px; margin: 10px; transition: 0.2s;
+        }
+        .btn:hover { transform: scale(1.05); filter: brightness(1.2); }
+        
+        .skin-option { display: inline-block; width: 40px; height: 40px; border-radius: 50%; margin: 5px; cursor: pointer; border: 2px solid #fff; }
+        
+        /* Управление */
+        .controls { display: grid; grid-template-columns: repeat(3, 70px); gap: 10px; margin-top: 20px; }
+        .btn-ctrl { width: 70px; height: 70px; background: #222; border: 2px solid #444; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 28px; }
+        
+        #countdown { position: fixed; font-size: 100px; font-weight: bold; z-index: 1000; pointer-events: none; display: none; text-shadow: 0 0 20px var(--primary); }
+    </style>
+</head>
+<body>
+
+    <div id="countdown">3</div>
+
+    <div id="startScreen" class="overlay">
+        <div class="card">
+            <h1 style="margin-top:0">SNAKE PRO</h1>
+            <button class="btn" onclick="initGame()">ИГРАТЬ</button>
+            <button class="btn" style="background:#444" onclick="showMenu('skinMenu')">СКИНЫ</button>
+            <button class="btn" style="background:#444" onclick="showMenu('settingsMenu')">⚙️</button>
+        </div>
+    </div>
+
+    <div id="skinMenu" class="overlay" style="display:none">
+        <div class="card">
+            <h2>ВЫБЕРИ ЦВЕТ</h2>
+            <div id="colorContainer"></div>
+            <h2>АКСЕССУАРЫ</h2>
+            <button class="btn" style="background:#555" onclick="setExtra('none')">НЕТ</button>
+            <button class="btn" style="background:#555" onclick="setExtra('cape')">ПЛАЩ</button>
+            <button class="btn" style="background:#555" onclick="setExtra('crown')">КОРОНА</button>
+            <br>
+            <button class="btn" onclick="hideAllMenus()">ГОТОВО</button>
+        </div>
+    </div>
+
+    <div id="settingsMenu" class="overlay" style="display:none">
+        <div class="card">
+            <h2>НАСТРОЙКИ</h2>
+            <label>Музыка: <span id="bgVolVal">30</span>%</label>
+            <input type="range" id="bgVol" min="0" max="100" value="30" style="width:100%" oninput="saveConfig()">
+            <label>Эффекты: <span id="fxVolVal">50</span>%</label>
+            <input type="range" id="fxVol" min="0" max="100" value="50" style="width:100%" oninput="saveConfig()">
+            <button class="btn" onclick="hideAllMenus()">НАЗАД</button>
+        </div>
+    </div>
+
+    <div id="deathScreen" class="overlay" style="display:none">
+        <div class="card">
+            <h1 style="color:#ff4757">ТЫ ПРОИГРАЛ!</h1>
+            <p style="font-size:24px">Твой результат: <span id="finalScore">0</span></p>
+            <button class="btn" onclick="location.reload()">ЕЩЕ РАЗ</button>
+        </div>
+    </div>
+
+    <div style="font-size: 24px; margin-bottom: 10px;">🍎: <span id="scoreVal">0</span></div>
+    <canvas id="gameCanvas" width="360" height="360"></canvas>
+
+    <div class="controls">
+        <div id="up" class="btn-ctrl" style="grid-column: 2;">▲</div>
+        <div id="left" class="btn-ctrl" style="grid-row: 2; grid-column: 1;">◀</div>
+        <div id="down" class="btn-ctrl" style="grid-row: 2; grid-column: 2;">▼</div>
+        <div id="right" class="btn-ctrl" style="grid-row: 2; grid-column: 3;">▶</div>
+    </div>
+
+    <audio id="bgMusic" loop>
+        <source src="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" type="audio/mpeg">
+    </audio>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        const music = document.getElementById("bgMusic");
+        
+        // --- СОСТОЯНИЕ И СОХРАНЕНИЯ ---
+        let config = JSON.parse(localStorage.getItem('snakeConfig')) || {
+            color: '#00ff00',
+            extra: 'none',
+            bgVol: 30,
+            fxVol: 50
+        };
+
+        let score = 0;
+        let isPaused = true;
+        let foods = [{ x: 100, y: 100 }];
+        let snake = [];
+        for(let i=0; i<15; i++) snake.push({x: 180, y: 180});
+        
+        let angle = 0, targetAngle = 0;
+        let speed = 2.5;
+
+        // --- ИНИЦИАЛИЗАЦИЯ ---
+        function saveConfig() {
+            config.bgVol = document.getElementById('bgVol').value;
+            config.fxVol = document.getElementById('fxVol').value;
+            document.getElementById('bgVolVal').innerText = config.bgVol;
+            document.getElementById('fxVolVal').innerText = config.fxVol;
+            music.volume = config.bgVol / 100;
+            localStorage.setItem('snakeConfig', JSON.stringify(config));
+        }
+
+        function initGame() {
+            document.getElementById('startScreen').style.display = 'none';
+            music.play();
+            saveConfig();
+            startCountdown();
+        }
+
+        const colors = ['#00ff00', '#ff00ff', '#00ffff', '#ffff00', '#ff4d4d', '#ffffff'];
+        const colContainer = document.getElementById('colorContainer');
+        colors.forEach(c => {
+            let div = document.createElement('div');
+            div.className = 'skin-option';
+            div.style.background = c;
+            div.onclick = () => { config.color = c; saveConfig(); };
+            colContainer.appendChild(div);
+        });
+
+        function setExtra(type) { config.extra = type; saveConfig(); }
+        function showMenu(id) { document.getElementById(id).style.display = 'flex'; }
+        function hideAllMenus() { 
+            document.querySelectorAll('.overlay').forEach(el => {
+                if(el.id !== 'startScreen') el.style.display = 'none';
+            });
+        }
+
+        function startCountdown() {
+            isPaused = true;
+            let c = 3;
+            const el = document.getElementById('countdown');
+            el.style.display = 'block';
+            let timer = setInterval(() => {
+                el.innerText = c;
+                c--;
+                if(c < 0) {
+                    clearInterval(timer);
+                    el.style.display = 'none';
+                    isPaused = false;
+                    requestAnimationFrame(loop);
+                }
+            }, 800);
+        }
+
+        // --- ЛОГИКА ИГРЫ ---
+        function setDir(a) { 
+            if(isPaused) return;
+            targetAngle = a; 
+        }
+
+        const bind = (id, a) => {
+            const el = document.getElementById(id);
+            el.addEventListener("touchstart", (e) => { e.preventDefault(); setDir(a); });
+            el.addEventListener("mousedown", (e) => { e.preventDefault(); setDir(a); });
+        };
+        bind("up", -Math.PI/2); bind("down", Math.PI/2);
+        bind("left", Math.PI); bind("right", 0);
+
+        function update() {
+            if(isPaused) return;
+            
+            let diff = targetAngle - angle;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            angle += diff * 0.15;
+
+            const head = { x: snake[0].x + Math.cos(angle)*speed, y: snake[0].y + Math.sin(angle)*speed };
+
+            foods.forEach(f => {
+                if(Math.hypot(head.x - f.x, head.y - f.y) < 15) {
+                    score++;
+                    document.getElementById('scoreVal').innerText = score;
+                    f.x = Math.random()*320+20; f.y = Math.random()*320+20;
+                    if(score % 10 === 0) foods.push({x: Math.random()*320+20, y: Math.random()*320+20});
+                    for(let i=0; i<10; i++) snake.push({...snake[snake.length-1]});
+                }
+            });
+
+            if(head.x < 0 || head.x > 360 || head.y < 0 || head.y > 360) gameOver();
+            for(let i=30; i<snake.length; i++) {
+                if(Math.hypot(head.x - snake[i].x, head.y - snake[i].y) < 6) gameOver();
+            }
+            snake.unshift(head); snake.pop();
+        }
+
+        function draw() {
+            ctx.clearRect(0,0,360,360);
+            
+            foods.forEach(f => {
+                ctx.fillStyle = "#ff4757";
+                ctx.beginPath(); ctx.arc(f.x, f.y, 10, 0, Math.PI*2); ctx.fill();
+            });
+
+            snake.forEach((p, i) => {
+                ctx.fillStyle = i === 0 ? config.color : config.color + 'aa';
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 10 - (i*0.03 > 5 ? 5 : i*0.03), 0, Math.PI*2);
+                ctx.fill();
+
+                if(i === 0) {
+                    // ЛИЦО
+                    ctx.fillStyle = "white";
+                    ctx.beginPath();
+                    ctx.arc(p.x + Math.cos(angle-0.5)*8, p.y + Math.sin(angle-0.5)*8, 5, 0, Math.PI*2);
+                    ctx.arc(p.x + Math.cos(angle+0.5)*8, p.y + Math.sin(angle+0.5)*8, 5, 0, Math.PI*2);
+                    ctx.fill();
+                    
+                    // АКСЕССУАРЫ
+                    if(config.extra === 'crown') {
+                        ctx.fillStyle = "gold";
+                        ctx.fillRect(p.x-10, p.y-20, 20, 10);
+                    }
+                }
+                
+                // ПЛАЩ (отрисовка за змейкой)
+                if(config.extra === 'cape' && i > 2 && i < 15) {
+                    ctx.fillStyle = "rgba(255, 0, 0, 0.3)";
+                    ctx.beginPath(); ctx.arc(p.x, p.y, 12, 0, Math.PI*2); ctx.fill();
+                }
+            });
+        }
+
+        function gameOver() {
+            isPaused = true;
+            music.pause();
+            document.getElementById('finalScore').innerText = score;
+            document.getElementById('deathScreen').style.display = 'flex';
+        }
+
+        function loop() {
+            if(!isPaused) {
+                update();
+                draw();
+                requestAnimationFrame(loop);
+            }
+        }
+        
+        // Загрузка настроек при старте
+        window.onload = () => {
+            document.getElementById('bgVol').value = config.bgVol;
+            document.getElementById('fxVol').value = config.fxVol;
+            updateVolumesDisplay();
+        };
+
+        function updateVolumesDisplay() {
+            document.getElementById('bgVolVal').innerText = config.bgVol;
+            document.getElementById('fxVolVal').innerText = config.fxVol;
+        }
+
+    </script>
+</body>
+</html>
+
